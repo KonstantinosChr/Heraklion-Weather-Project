@@ -1,5 +1,7 @@
 package com.example.heraklionweatherproject
 
+@file:OptIn(kotlinx.serialization.InternalSerializationApi::class)
+
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -118,6 +120,7 @@ fun getWeatherIcon(code: Int): String {
         else -> "❓"
     }
 }
+
 fun getDayName(dateString: String): String {
     return try {
         val format = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
@@ -134,11 +137,13 @@ fun getDayName(dateString: String): String {
             calendar.get(Calendar.YEAR) == today.get(Calendar.YEAR) && calendar.get(Calendar.DAY_OF_YEAR) == today.get(Calendar.DAY_OF_YEAR) -> "Σήμερα"
             calendar.get(Calendar.YEAR) == tomorrow.get(Calendar.YEAR) && calendar.get(Calendar.DAY_OF_YEAR) == tomorrow.get(Calendar.DAY_OF_YEAR) -> "Αύριο"
             else -> {
-                val dayFormat = SimpleDateFormat("EEEE", Locale("el", "GR"))
+                // ΔΙΟΡΘΩΣΗ 1: Νέος τρόπος δήλωσης του Locale
+                val dayFormat = SimpleDateFormat("EEEE", Locale.Builder().setLanguage("el").setRegion("GR").build())
                 dayFormat.format(date).replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
             }
         }
-    } catch (e: Exception) {
+        // ΔΙΟΡΘΩΣΗ 2: Χρήση του '_' αντί για 'e' αφού δεν χρησιμοποιούμε το σφάλμα
+    } catch (_: Exception) {
         dateString
     }
 }
