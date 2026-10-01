@@ -1,6 +1,5 @@
-package com.example.heraklionweatherproject
-
 @file:OptIn(kotlinx.serialization.InternalSerializationApi::class)
+package com.example.heraklionweatherproject
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
