@@ -1,7 +1,9 @@
 # Heraklion Weather App ☀️🌧️
-<img width="1080" height="2400" alt="Screenshot_1790863795" src="https://github.com/user-attachments/assets/b1eb4567-fe23-4fdb-961b-370ffe6083dc" />
-<img width="1080" height="2400" alt="Screenshot_1790863721" src="https://github.com/user-attachments/assets/3328139f-28cf-4217-9853-be22fd2027f9" />
-<img width="1080" height="2400" alt="Screenshot_1790863718" src="https://github.com/user-attachments/assets/292daf21-e27a-47da-a6ea-0bc8d14902f8" />
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/3328139f-28cf-4217-9853-be22fd2027f9" width="30%" />
+  <img src="https://github.com/user-attachments/assets/292daf21-e27a-47da-a6ea-0bc8d14902f8" width="30%" />
+  <img src="https://github.com/user-attachments/assets/b1eb4567-fe23-4fdb-961b-370ffe6083dc" width="30%" />
+</p>
 
 A modern and elegant Android application that displays real-time weather data for **Heraklion, Crete**. Built from scratch using the latest Android development technologies and best practices (Jetpack Compose, MVVM).
 
@@ -27,4 +29,8 @@ The app fetches its data via the free [Open-Meteo API](https://open-meteo.com/),
 ## 🚀 Local Installation
 1. Clone the repository:
    ```bash
-   git clone [https://github.com/KonstantinosChr/Heraklion-Weather-Project.git](https://github.com/KonstantinosChr/Heraklion-Weather-Project.git)
+   git clone https://github.com/KonstantinosChr/Heraklion-Weather-Project.git
+Open the project in Android Studio or IntelliJ IDEA.
+Allow Gradle to finish the synchronization (Sync).
+Press the Run button, selecting an Emulator or a physical Android device (API 24+).
+Crafted with passion as my first Android Project!
