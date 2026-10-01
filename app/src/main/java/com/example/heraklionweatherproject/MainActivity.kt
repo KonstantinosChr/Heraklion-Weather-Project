@@ -104,7 +104,7 @@ class WeatherViewModel : ViewModel() {
     }
 }
 
-// --- 4. Helper (Αντιστοιχία Κωδικού με Emojis) ---
+// --- 4. Helper ---
 fun getWeatherIcon(code: Int): String {
     return when (code) {
         0 -> "☀️"
@@ -118,8 +118,6 @@ fun getWeatherIcon(code: Int): String {
         else -> "❓"
     }
 }
-
-// ΔΙΟΡΘΩΣΗ: Παλιός τρόπος ημερομηνίας (Calendar) για να παίζει στο API 24!
 fun getDayName(dateString: String): String {
     return try {
         val format = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
@@ -145,7 +143,7 @@ fun getDayName(dateString: String): String {
     }
 }
 
-// --- 5. UI (Γραφικά) ---
+// --- 5. UI  ---
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
