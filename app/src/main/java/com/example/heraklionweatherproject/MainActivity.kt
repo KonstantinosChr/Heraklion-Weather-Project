@@ -141,7 +141,7 @@ fun getDayName(dateString: String): String {
                 dayFormat.format(date).replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
             }
         }
-        // ΔΙΟΡΘΩΣΗ 2: Χρήση του '_' αντί για 'e' αφού δεν χρησιμοποιούμε το σφάλμα
+        // Use _ instead of e, because no error
     } catch (_: Exception) {
         dateString
     }
