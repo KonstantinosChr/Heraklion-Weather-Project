@@ -1,8 +1,14 @@
 # Heraklion Weather App ☀️🌧️
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/3328139f-28cf-4217-9853-be22fd2027f9" width="30%" />
-  <img src="https://github.com/user-attachments/assets/292daf21-e27a-47da-a6ea-0bc8d14902f8" width="30%" />
-  <img src="https://github.com/user-attachments/assets/b1eb4567-fe23-4fdb-961b-370ffe6083dc" width="30%" />
+  <img src="docs/screenshots/overview.png" width="30%" alt="Weather overview" />
+  <img src="docs/screenshots/temperature-chart.png" width="30%" alt="Temperature chart" />
+  <img src="docs/screenshots/settings.png" width="30%" alt="Settings" />
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/hourly-forecast.png" width="30%" alt="Hourly forecast" />
+  <img src="docs/screenshots/daily-details.png" width="30%" alt="Daily forecast details" />
+  <img src="docs/screenshots/error-state.png" width="30%" alt="Error state" />
 </p>
 
 A modern and elegant Android application that displays real-time weather data for **Heraklion, Crete**. Built from scratch using the latest Android development technologies and best practices (Jetpack Compose, MVVM).

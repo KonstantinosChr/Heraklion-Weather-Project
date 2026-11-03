@@ -1,36 +1,35 @@
-@file:OptIn(kotlinx.serialization.InternalSerializationApi::class)
 package com.example.heraklionweatherproject
-// -- Imports -- 
+
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
-import okhttp3.MediaType.Companion.toMediaType
-import retrofit2.Retrofit
-import retrofit2.http.GET
-import retrofit2.http.Query
-import java.text.SimpleDateFormat
-import java.util.Calendar
-import java.util.Locale
+import kotlinx.coroutines.delay
+import java.util.Date
 
 // --- 1. Data Models (API Open-Meteo) ---
 @Serializable
@@ -151,123 +150,240 @@ fun getDayName(dateString: String): String {
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent {
-            MaterialTheme {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = Color(0xFFE3F2FD)
-                ) {
-                    WeatherScreen()
-                }
-            }
-        }
+        setContent { WeatherScreen() }
     }
 }
 
 @Composable
 fun WeatherScreen(viewModel: WeatherViewModel = viewModel()) {
-    val uiState by viewModel.uiState.collectAsState()
-
-    when (val state = uiState) {
-        is WeatherUiState.Loading -> {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
+    val state by viewModel.uiState.collectAsState()
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("appearance", 0) }
+    val systemDark = isSystemInDarkTheme()
+    var dark by rememberSaveable { mutableStateOf(prefs.getBoolean("dark", systemDark)) }
+    var fahrenheit by rememberSaveable { mutableStateOf(prefs.getBoolean("fahrenheit", false)) }
+    var english by rememberSaveable { mutableStateOf(prefs.getString("language", "el") == "en") }
+    var settingsOpen by rememberSaveable { mutableStateOf(false) }
+    val colors = if (dark) darkColorScheme(
+        primary = Color(0xFF8ED9F3), background = Color(0xFF0D1929), surface = Color(0xFF192B40),
+        surfaceVariant = Color(0xFF22374D), onSurface = Color(0xFFEDF6FF)
+    ) else lightColorScheme(
+        primary = Color(0xFF076A89), background = Color(0xFFF1F6FA), surface = Color.White,
+        surfaceVariant = Color(0xFFE0EDF4), onSurface = Color(0xFF142C41)
+    )
+    CompositionLocalProvider(LocalEnglish provides english) {
+        MaterialTheme(colorScheme = colors) {
+            Surface(Modifier.fillMaxSize(), color = colors.background) {
+                Column(Modifier.fillMaxSize().safeDrawingPadding()) {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Column {
+                            Text(tr("ΗΡΑΚΛΕΙΟ", "HERAKLION"), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                            Text(tr("Κρήτη · Ελλάδα", "Crete · Greece"), style = MaterialTheme.typography.labelMedium)
+                        }
+                        TextButton(onClick = { settingsOpen = true }) {
+                            Text(tr("Ρυθμίσεις", "Settings"))
+                        }
+                    }
+                    Crossfade(targetState = when { state.data != null -> "content"; state.loading -> "loading"; else -> "error" },
+                        animationSpec = tween(350), label = "screen") { screen ->
+                        when (screen) {
+                            "loading" -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                                    CircularProgressIndicator()
+                                    Text(tr("Ο καιρός στο Ηράκλειο…", "Weather in Heraklion…"))
+                                }
+                            }
+                            "error" -> Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                                    Text(tr("Δεν μπορέσαμε να φορτώσουμε τον καιρό", "Unable to load the weather"), style = MaterialTheme.typography.titleLarge)
+                                    Text(tr("Δεν ήταν δυνατή η ενημέρωση. Έλεγξε τη σύνδεσή σου και δοκίμασε ξανά.", "Unable to update. Check your connection and try again."))
+                                    Button(onClick = viewModel::fetchWeather) { Text(tr("Προσπάθεια ξανά", "Try again")) }
+                                }
+                            }
+                            else -> state.data?.let { data ->
+                                WeatherContent(data, state, fahrenheit, viewModel::fetchWeather)
+                            }
+                        }
+                    }
+                }
             }
-        }
-        is WeatherUiState.Success -> {
-            val current = state.data.current
-            val daily = state.data.daily
-
-            LazyColumn(
-                modifier = Modifier.fillMaxSize().padding(16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                item {
-                    Text(text = "Ηράκλειο", fontSize = 36.sp, fontWeight = FontWeight.Bold, color = Color.DarkGray)
-                    Text(text = "Κρήτη", fontSize = 18.sp, color = Color.Gray)
-                    Spacer(modifier = Modifier.height(24.dp))
-
-                    Text(text = getWeatherIcon(current.weather_code), fontSize = 80.sp)
-                    Text(text = "${current.temperature_2m}°C", fontSize = 64.sp, fontWeight = FontWeight.Bold)
-                    Text(text = "Αίσθηση: ${current.apparent_temperature}°C", fontSize = 16.sp, color = Color.DarkGray)
-
-                    Spacer(modifier = Modifier.height(32.dp))
-
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                        MetricCard(title = "Υγρασία", value = "${current.relative_humidity_2m}%", icon = "💧")
-                        MetricCard(title = "Άνεμος", value = "${current.wind_speed_10m} km/h", icon = "💨")
-                    }
-
-                    Spacer(modifier = Modifier.height(32.dp))
-
-                    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
-                        Text(text = "Πρόβλεψη Εβδομάδας", fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                    }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-                }
-
-                items(daily.time.size) { index ->
-                    DailyForecastItem(
-                        date = daily.time[index],
-                        weatherCode = daily.weather_code[index],
-                        minTemp = daily.temperature_2m_min[index],
-                        maxTemp = daily.temperature_2m_max[index]
-                    )
-                }
-            }
-        }
-        is WeatherUiState.Error -> {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(text = "Σφάλμα", color = Color.Red, fontSize = 24.sp)
-                    Text(text = state.message, modifier = Modifier.padding(16.dp))
-                    Button(onClick = { viewModel.fetchWeather() }) {
-                        Text("Προσπάθεια Ξανά")
-                    }
-                }
+            if (settingsOpen) {
+                SettingsDialog(
+                    english = english, dark = dark, fahrenheit = fahrenheit,
+                    onLanguage = { value ->
+                        english = value
+                        prefs.edit().putString("language", if (value) "en" else "el").apply()
+                    },
+                    onDark = { value -> dark = value; prefs.edit().putBoolean("dark", value).apply() },
+                    onFahrenheit = { value -> fahrenheit = value; prefs.edit().putBoolean("fahrenheit", value).apply() },
+                    onDismiss = { settingsOpen = false }
+                )
             }
         }
     }
 }
 
 @Composable
-fun MetricCard(title: String, value: String, icon: String) {
-    Card(
-        modifier = Modifier.size(140.dp, 100.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-    ) {
-        Column(
-            modifier = Modifier.fillMaxSize().padding(12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            Text(text = icon, fontSize = 24.sp)
-            Text(text = value, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-            Text(text = title, fontSize = 14.sp, color = Color.Gray)
+private fun WeatherContent(data: WeatherResponse, state: WeatherUiState, fahrenheit: Boolean,
+                           refresh: () -> Unit) {
+    var now by remember { mutableStateOf(athensTime("yyyy-MM-dd'T'HH:00")) }
+    LaunchedEffect(Unit) {
+        while (true) { now = athensTime("yyyy-MM-dd'T'HH:00"); delay(60_000) }
+    }
+    val hours = data.hourly.upcoming(now)
+    LazyColumn(contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        item(key = "status") {
+            Column {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(if (state.updatedAt == 0L) tr("Αναμονή ενημέρωσης", "Waiting for update") else
+                        "${if (state.cached) tr("Αποθηκευμένα", "Saved data") else tr("Ενημέρωση", "Updated")} · ${athensTime("dd/MM HH:mm", Date(state.updatedAt))}",
+                        modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelMedium)
+                    TextButton(onClick = refresh, enabled = !state.loading) {
+                        Text(if (state.loading) tr("Ανανέωση…", "Refreshing…") else tr("Ανανέωση ↻", "Refresh ↻"))
+                    }
+                }
+                if (state.loading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                AnimatedVisibility(state.error != null, enter = fadeIn(tween(250)),
+                    exit = fadeOut(tween(150))) {
+                    Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.errorContainer) {
+                        Text(tr("Δεν ήταν δυνατή η ενημέρωση. Προβάλλονται τα τελευταία αποθηκευμένα δεδομένα.",
+                            "Unable to update. Showing the last saved data."),
+                            Modifier.padding(16.dp), color = MaterialTheme.colorScheme.onErrorContainer)
+                    }
+                }
+            }
+        }
+        item(key = "hero") { Reveal { CurrentWeather(data.current, fahrenheit) } }
+        item(key = "dailySummary") {
+            DailySummaryCard(data, fahrenheit, now.substringBefore('T'))
+        }
+
+        item(key = "shareForecast") {
+            ShareForecastButton(
+                data, state, fahrenheit, now.substringBefore('T')
+            )
+        }
+
+        item(key = "temperatureChart") {
+            TemperatureChart(data.hourly, now, fahrenheit)
+        }
+        item(key = "metrics") {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                MetricCard(tr("Υγρασία", "Humidity"), "${data.current.relative_humidity_2m}%", "💧", Modifier.weight(1f))
+                MetricCard(tr("Άνεμος", "Wind"), "${data.current.wind_speed_10m} km/h", "💨", Modifier.weight(1f))
+            }
+        }
+        item(key = "hourly") {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                SectionTitle(tr("Οι επόμενες 24 ώρες", "The next 24 hours"))
+                if (hours.isEmpty()) Text(tr("Δεν υπάρχουν διαθέσιμα ωριαία δεδομένα. Δοκίμασε ανανέωση.", "No hourly data available. Try refreshing."))
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    items(hours, key = { data.hourly.time[it] }) { i ->
+                        Surface(shape = RoundedCornerShape(22.dp), color = MaterialTheme.colorScheme.surface) {
+                            Column(Modifier.width(88.dp).padding(vertical = 16.dp), horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Text(data.hourly.time[i].substringAfter('T'), style = MaterialTheme.typography.labelLarge)
+                                Text(getWeatherIcon(data.hourly.weather_code[i] ?: -1, data.hourly.is_day.getOrNull(i) != 0), fontSize = 28.sp)
+                                Text(temperature(requireNotNull(data.hourly.temperature_2m[i]), fahrenheit), fontWeight = FontWeight.Bold)
+                                Text("💧 ${data.hourly.precipitation_probability.getOrNull(i)?.let { "$it%" } ?: "—"}",
+                                    style = MaterialTheme.typography.labelMedium)
+                            }
+                        }
+                    }
+                }
+                Text(tr("Ώρες Ελλάδας · 💧 Πιθανότητα βροχής", "Greek local time · 💧 Chance of rain"), style = MaterialTheme.typography.labelSmall)
+            }
+        }
+        item(key = "weekTitle") { SectionTitle(tr("Η εβδομάδα σου", "Your week")) }
+        items((0 until data.daily.count).toList(), key = { data.daily.time[it] }) { i ->
+            DailyForecastItem(data.daily, i, fahrenheit)
+        }
+        item(key = "footer") {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(tr("Πάτησε μια ημέρα για λεπτομέρειες.\nΔεδομένα: Open-Meteo · Πρόγνωση, όχι επίσημες προειδοποιήσεις.", "Tap a day for details.\nData: Open-Meteo · Forecast, not official weather warnings."),
+                    style = MaterialTheme.typography.bodySmall)
+            }
         }
     }
 }
 
 @Composable
-fun DailyForecastItem(date: String, weatherCode: Int, minTemp: Double, maxTemp: Double) {
-    Card(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        shape = RoundedCornerShape(16.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(text = getDayName(date), fontSize = 16.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-            Text(text = getWeatherIcon(weatherCode), fontSize = 24.sp, modifier = Modifier.padding(horizontal = 16.dp))
-            Row(modifier = Modifier.weight(1f), horizontalArrangement = Arrangement.End) {
-                Text(text = "${minTemp.toInt()}°", color = Color.Gray, modifier = Modifier.padding(end = 8.dp))
-                Text(text = "${maxTemp.toInt()}°", fontWeight = FontWeight.Bold)
+private fun Reveal(content: @Composable () -> Unit) {
+    var entered by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { entered = true }
+    val progress by animateFloatAsState(if (entered) 1f else 0f,
+        animationSpec = tween(550, easing = FastOutSlowInEasing), label = "entrance")
+    Box(Modifier.graphicsLayer { alpha = progress; translationY = (1f - progress) * 32.dp.toPx() }) { content() }
+}
+
+@Composable
+private fun CurrentWeather(current: Current, fahrenheit: Boolean) {
+    val day = current.is_day == 1
+    val sky by animateColorAsState(if (day) Color(0xFF086D93) else Color(0xFF202C61),
+        animationSpec = tween(700), label = "sky")
+    Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(32.dp))
+        .background(Brush.verticalGradient(listOf(sky, if (day) Color(0xFF104461) else Color(0xFF101831))))) {
+        Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(if (day) tr("ΗΡΑΚΛΕΙΟ ΤΩΡΑ · ΗΜΕΡΑ", "HERAKLION NOW · DAY") else tr("ΗΡΑΚΛΕΙΟ ΤΩΡΑ · ΝΥΧΤΑ", "HERAKLION NOW · NIGHT"), color = Color(0xFFC2E8F7),
+                style = MaterialTheme.typography.labelLarge)
+            Text(getWeatherIcon(current.weather_code, day), fontSize = 76.sp)
+            AnimatedContent(targetState = temperature(current.temperature_2m, fahrenheit),
+                transitionSpec = {
+                    (fadeIn(tween(300)) + slideInVertically(tween(300)) { it / 4 }) togetherWith
+                            fadeOut(tween(120))
+                }, label = "temperature") { value ->
+                Text(value, color = Color.White, fontSize = 64.sp, fontWeight = FontWeight.Light)
+            }
+            Text(localWeatherDescription(current.weather_code), color = Color.White, style = MaterialTheme.typography.titleMedium)
+            Text("${tr("Αίσθηση", "Feels like")} ${temperature(current.apparent_temperature, fahrenheit)}", color = Color(0xFFC2E8F7))
+        }
+    }
+}
+
+@Composable
+private fun SectionTitle(title: String) {
+    Text(title, Modifier.semantics { heading() }, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+}
+
+@Composable
+fun MetricCard(title: String, value: String, icon: String, modifier: Modifier = Modifier) {
+    Surface(modifier, shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(icon, fontSize = 24.sp)
+            Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text(title, style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
+@Composable
+private fun DailyForecastItem(daily: Daily, i: Int, fahrenheit: Boolean) {
+    var expanded by rememberSaveable(daily.time[i]) { mutableStateOf(false) }
+    Card(onClick = { expanded = !expanded }, shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.fillMaxWidth().animateContentSize(tween(300)).padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(localDayName(daily.time[i]), Modifier.weight(1f), fontWeight = FontWeight.Medium)
+                Text(getWeatherIcon(daily.weather_code[i]), fontSize = 24.sp)
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(temperature(daily.temperature_2m_max[i], fahrenheit), fontWeight = FontWeight.Bold)
+                    Text(temperature(daily.temperature_2m_min[i], fahrenheit), style = MaterialTheme.typography.bodySmall)
+                }
+                Text(if (expanded) "−" else "+")
+            }
+            if (expanded) {
+                Column(Modifier.padding(top = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    HorizontalDivider()
+                    Text(localWeatherDescription(daily.weather_code[i]))
+                    Text("${tr("Πιθανότητα βροχής", "Chance of rain")}: ${daily.precipitation_probability_max.getOrNull(i)?.let { "$it%" } ?: "—"}")
+                    Text("${tr("Μέγιστος δείκτης UV", "Maximum UV index")}: ${daily.uv_index_max.getOrNull(i) ?: "—"}")
+                    Text("${tr("Ανατολή", "Sunrise")}: ${daily.sunrise.getOrNull(i)?.substringAfter('T') ?: "—"}   ·   ${tr("Δύση", "Sunset")}: ${daily.sunset.getOrNull(i)?.substringAfter('T') ?: "—"}")
+                }
             }
         }
     }
