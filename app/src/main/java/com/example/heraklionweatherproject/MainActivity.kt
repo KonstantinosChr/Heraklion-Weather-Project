@@ -1,6 +1,12 @@
 package com.example.heraklionweatherproject
 
+import android.Manifest
+import android.app.Activity
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.*
@@ -21,6 +27,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
+import androidx.compose.ui.platform.LocalView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import kotlin.math.roundToInt
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -31,125 +46,11 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.delay
 import java.util.Date
 
-// --- 1. Data Models (API Open-Meteo) ---
-@Serializable
-data class WeatherResponse(
-    val current: Current,
-    val daily: Daily
-)
 
-@Serializable
-data class Current(
-    val temperature_2m: Double,
-    val relative_humidity_2m: Int,
-    val apparent_temperature: Double,
-    val weather_code: Int,
-    val wind_speed_10m: Double
-)
-
-@Serializable
-data class Daily(
-    val time: List<String>,
-    val weather_code: List<Int>,
-    val temperature_2m_max: List<Double>,
-    val temperature_2m_min: List<Double>
-)
-
-// --- 2. Network & API ---
-interface WeatherApi {
-    @GET("v1/forecast")
-    suspend fun getHeraklionWeather(
-        @Query("latitude") lat: Double = 35.3387,
-        @Query("longitude") lon: Double = 25.1442,
-        @Query("current") current: String = "temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m",
-        @Query("daily") daily: String = "weather_code,temperature_2m_max,temperature_2m_min",
-        @Query("timezone") timezone: String = "auto"
-    ): WeatherResponse
-}
-
-object NetworkModule {
-    private val json = Json { ignoreUnknownKeys = true }
-    val api: WeatherApi by lazy {
-        Retrofit.Builder()
-            .baseUrl("https://api.open-meteo.com/")
-            .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
-            .build()
-            .create(WeatherApi::class.java)
-    }
-}
-
-// --- 3. ViewModel ---
-sealed interface WeatherUiState {
-    object Loading : WeatherUiState
-    data class Success(val data: WeatherResponse) : WeatherUiState
-    data class Error(val message: String) : WeatherUiState
-}
-
-class WeatherViewModel : ViewModel() {
-    private val _uiState = MutableStateFlow<WeatherUiState>(WeatherUiState.Loading)
-    val uiState = _uiState.asStateFlow()
-
-    init { fetchWeather() }
-
-    fun fetchWeather() {
-        viewModelScope.launch {
-            _uiState.value = WeatherUiState.Loading
-            try {
-                val data = NetworkModule.api.getHeraklionWeather()
-                _uiState.value = WeatherUiState.Success(data)
-            } catch (e: Exception) {
-                _uiState.value = WeatherUiState.Error("Αποτυχία σύνδεσης: ${e.message}")
-            }
-        }
-    }
-}
-
-// --- 4. Helper ---
-fun getWeatherIcon(code: Int): String {
-    return when (code) {
-        0 -> "☀️"
-        1, 2, 3 -> "⛅"
-        45, 48 -> "🌫️"
-        51, 53, 55, 56, 57 -> "🌦️"
-        61, 63, 65, 66, 67 -> "🌧️"
-        71, 73, 75, 77 -> "❄️"
-        80, 81, 82 -> "🌧️"
-        95, 96, 99 -> "⛈️"
-        else -> "❓"
-    }
-}
-
-fun getDayName(dateString: String): String {
-    return try {
-        val format = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-        val date = format.parse(dateString) ?: return dateString
-
-        val calendar = Calendar.getInstance()
-        calendar.time = date
-
-        val today = Calendar.getInstance()
-        val tomorrow = Calendar.getInstance()
-        tomorrow.add(Calendar.DAY_OF_YEAR, 1)
-
-        when {
-            calendar.get(Calendar.YEAR) == today.get(Calendar.YEAR) && calendar.get(Calendar.DAY_OF_YEAR) == today.get(Calendar.DAY_OF_YEAR) -> "Σήμερα"
-            calendar.get(Calendar.YEAR) == tomorrow.get(Calendar.YEAR) && calendar.get(Calendar.DAY_OF_YEAR) == tomorrow.get(Calendar.DAY_OF_YEAR) -> "Αύριο"
-            else -> {
-                // ΔΙΟΡΘΩΣΗ 1: Νέος τρόπος δήλωσης του Locale
-                val dayFormat = SimpleDateFormat("EEEE", Locale.Builder().setLanguage("el").setRegion("GR").build())
-                dayFormat.format(date).replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
-            }
-        }
-        // Use _ instead of e, because no error
-    } catch (_: Exception) {
-        dateString
-    }
-}
-
-// --- 5. UI  ---
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        BackgroundRefresh.sync(this)
         setContent { WeatherScreen() }
     }
 }
@@ -159,11 +60,39 @@ fun WeatherScreen(viewModel: WeatherViewModel = viewModel()) {
     val state by viewModel.uiState.collectAsState()
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("appearance", 0) }
-    val systemDark = isSystemInDarkTheme()
-    var dark by rememberSaveable { mutableStateOf(prefs.getBoolean("dark", systemDark)) }
+    var themeMode by rememberSaveable { mutableStateOf(AppPrefs.themeMode(context)) }
     var fahrenheit by rememberSaveable { mutableStateOf(prefs.getBoolean("fahrenheit", false)) }
     var english by rememberSaveable { mutableStateOf(prefs.getString("language", "el") == "en") }
+    var notifications by rememberSaveable { mutableStateOf(AppPrefs.notificationsEnabled(context)) }
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
+    val dark = when (themeMode) { "dark" -> true; "light" -> false; else -> isSystemInDarkTheme() }
+    // Status bar icons must stay readable: dark icons on the light theme, light icons on the dark one.
+    val view = LocalView.current
+    if (!view.isInEditMode) SideEffect {
+        (view.context as? Activity)?.window?.let { window ->
+            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !dark
+            WindowCompat.getInsetsController(window, view).isAppearanceLightNavigationBars = !dark
+        }
+    }
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        notifications = granted
+        AppPrefs.setNotificationsEnabled(context, granted)
+        BackgroundRefresh.sync(context)
+    }
+
+    // Auto refresh: on every return to the app and every 30 minutes while it stays open.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) viewModel.refreshIfStale()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    LaunchedEffect(Unit) {
+        while (true) { delay(30 * 60_000L); viewModel.refreshIfStale() }
+    }
+
     val colors = if (dark) darkColorScheme(
         primary = Color(0xFF8ED9F3), background = Color(0xFF0D1929), surface = Color(0xFF192B40),
         surfaceVariant = Color(0xFF22374D), onSurface = Color(0xFFEDF6FF)
@@ -171,10 +100,15 @@ fun WeatherScreen(viewModel: WeatherViewModel = viewModel()) {
         primary = Color(0xFF076A89), background = Color(0xFFF1F6FA), surface = Color.White,
         surfaceVariant = Color(0xFFE0EDF4), onSurface = Color(0xFF142C41)
     )
+    // Dynamic background: the screen picks up a soft tint of the current sky.
+    val current = state.data?.current
+    val kind = current?.let { skyKind(it.weather_code, it.is_day == 1) } ?: SkyKind.CLEAR_DAY
+    val tint by animateColorAsState(skyColors(kind, current?.is_day != 0).first, tween(900), label = "tint")
+    val background = Brush.verticalGradient(listOf(lerp(colors.background, tint, if (dark) 0.35f else 0.22f), colors.background))
     CompositionLocalProvider(LocalEnglish provides english) {
         MaterialTheme(colorScheme = colors) {
             Surface(Modifier.fillMaxSize(), color = colors.background) {
-                Column(Modifier.fillMaxSize().safeDrawingPadding()) {
+                Column(Modifier.fillMaxSize().background(background).safeDrawingPadding()) {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
                         horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Column {
@@ -210,13 +144,28 @@ fun WeatherScreen(viewModel: WeatherViewModel = viewModel()) {
             }
             if (settingsOpen) {
                 SettingsDialog(
-                    english = english, dark = dark, fahrenheit = fahrenheit,
+                    english = english, themeMode = themeMode, fahrenheit = fahrenheit, notifications = notifications,
                     onLanguage = { value ->
                         english = value
                         prefs.edit().putString("language", if (value) "en" else "el").apply()
+                        WeatherWidgetProvider.updateAll(context)
                     },
-                    onDark = { value -> dark = value; prefs.edit().putBoolean("dark", value).apply() },
-                    onFahrenheit = { value -> fahrenheit = value; prefs.edit().putBoolean("fahrenheit", value).apply() },
+                    onTheme = { value -> themeMode = value; AppPrefs.setThemeMode(context, value) },
+                    onFahrenheit = { value ->
+                        fahrenheit = value
+                        prefs.edit().putBoolean("fahrenheit", value).apply()
+                        WeatherWidgetProvider.updateAll(context)
+                    },
+                    onNotifications = { value ->
+                        if (value && Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context,
+                                Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                            permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        } else {
+                            notifications = value
+                            AppPrefs.setNotificationsEnabled(context, value)
+                            BackgroundRefresh.sync(context)
+                        }
+                    },
                     onDismiss = { settingsOpen = false }
                 )
             }
@@ -224,6 +173,7 @@ fun WeatherScreen(viewModel: WeatherViewModel = viewModel()) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun WeatherContent(data: WeatherResponse, state: WeatherUiState, fahrenheit: Boolean,
                            refresh: () -> Unit) {
@@ -231,8 +181,23 @@ private fun WeatherContent(data: WeatherResponse, state: WeatherUiState, fahrenh
     LaunchedEffect(Unit) {
         while (true) { now = athensTime("yyyy-MM-dd'T'HH:00"); delay(60_000) }
     }
+    val english = LocalEnglish.current
+    val today = now.substringBefore('T')
+    val month = today.substring(5, 7).toIntOrNull() ?: 1
+    val dayIndex = data.daily.time.indexOf(today)
     val hours = data.hourly.upcoming(now)
-    LazyColumn(contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp),
+    val extras = state.extras
+    val dayName: (String) -> String = { date -> dayLabel(date, english) }
+    val alerts = remember(data, extras, english, today) { weatherAlerts(data, extras, english, today, month, dayName) }
+    val activities = remember(data, extras, english, now, fahrenheit) {
+        activitySuggestions(data, extras, hours, today, fahrenheit, english, dayName)
+    }
+    val comparison = remember(data, extras, now) {
+        compareWithYesterday(extras.comparison, data.current.temperature_2m, now,
+            data.daily.temperature_2m_max.getOrNull(dayIndex), today, data.daily.daylight_duration.getOrNull(dayIndex))
+    }
+    PullToRefreshBox(isRefreshing = state.loading, onRefresh = refresh, modifier = Modifier.fillMaxSize()) {
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item(key = "status") {
             Column {
@@ -245,7 +210,7 @@ private fun WeatherContent(data: WeatherResponse, state: WeatherUiState, fahrenh
                         Text(if (state.loading) tr("Ανανέωση…", "Refreshing…") else tr("Ανανέωση ↻", "Refresh ↻"))
                     }
                 }
-                if (state.loading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                Text(tr("Σύρε προς τα κάτω για ανανέωση", "Pull down to refresh"), style = MaterialTheme.typography.labelSmall)
                 AnimatedVisibility(state.error != null, enter = fadeIn(tween(250)),
                     exit = fadeOut(tween(150))) {
                     Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.errorContainer) {
@@ -256,26 +221,19 @@ private fun WeatherContent(data: WeatherResponse, state: WeatherUiState, fahrenh
                 }
             }
         }
+        if (alerts.isNotEmpty()) item(key = "alerts") { AlertsSection(alerts) }
         item(key = "hero") { Reveal { CurrentWeather(data.current, fahrenheit) } }
-        item(key = "dailySummary") {
-            DailySummaryCard(data, fahrenheit, now.substringBefore('T'))
-        }
-
-        item(key = "shareForecast") {
-            ShareForecastButton(
-                data, state, fahrenheit, now.substringBefore('T')
-            )
-        }
-
-        item(key = "temperatureChart") {
-            TemperatureChart(data.hourly, now, fahrenheit)
-        }
-        item(key = "metrics") {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                MetricCard(tr("Υγρασία", "Humidity"), "${data.current.relative_humidity_2m}%", "💧", Modifier.weight(1f))
-                MetricCard(tr("Άνεμος", "Wind"), "${data.current.wind_speed_10m} km/h", "💨", Modifier.weight(1f))
-            }
-        }
+        item(key = "dailySummary") { DailySummaryCard(data, fahrenheit, today) }
+        comparison?.let { item(key = "comparison") { ComparisonCard(it, fahrenheit) } }
+        item(key = "shareForecast") { ShareForecastButton(data, state, fahrenheit, today) }
+        item(key = "temperatureChart") { TemperatureChart(data.hourly, now, fahrenheit) }
+        item(key = "activities") { ActivitiesCard(activities) }
+        item(key = "metrics") { MetricsGrid(data.current, fahrenheit) }
+        item(key = "wind") { WindCard(data.current, data.daily, dayIndex, month) }
+        extras.marine?.let { item(key = "sea") { SeaCard(it, data.current, data.daily.temperature_2m_max.getOrNull(dayIndex), fahrenheit) } }
+        extras.air?.let { item(key = "air") { AirQualityCard(it, now) } }
+        if (dayIndex >= 0) item(key = "sunMoon") { SunMoonCard(data.daily, dayIndex, comparison?.daylightDiffSeconds) }
+        extras.history?.let { item(key = "history") { HistoryCard(it, data.daily.temperature_2m_max.getOrNull(dayIndex), fahrenheit) } }
         item(key = "hourly") {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 SectionTitle(tr("Οι επόμενες 24 ώρες", "The next 24 hours"))
@@ -297,7 +255,7 @@ private fun WeatherContent(data: WeatherResponse, state: WeatherUiState, fahrenh
                 Text(tr("Ώρες Ελλάδας · 💧 Πιθανότητα βροχής", "Greek local time · 💧 Chance of rain"), style = MaterialTheme.typography.labelSmall)
             }
         }
-        item(key = "weekTitle") { SectionTitle(tr("Η εβδομάδα σου", "Your week")) }
+        item(key = "weekTitle") { SectionTitle(tr("Οι επόμενες ${data.daily.count} ημέρες", "The next ${data.daily.count} days")) }
         items((0 until data.daily.count).toList(), key = { data.daily.time[it] }) { i ->
             DailyForecastItem(data.daily, i, fahrenheit)
         }
@@ -307,6 +265,7 @@ private fun WeatherContent(data: WeatherResponse, state: WeatherUiState, fahrenh
                     style = MaterialTheme.typography.bodySmall)
             }
         }
+    }
     }
 }
 
@@ -322,10 +281,13 @@ private fun Reveal(content: @Composable () -> Unit) {
 @Composable
 private fun CurrentWeather(current: Current, fahrenheit: Boolean) {
     val day = current.is_day == 1
-    val sky by animateColorAsState(if (day) Color(0xFF086D93) else Color(0xFF202C61),
-        animationSpec = tween(700), label = "sky")
+    val kind = skyKind(current.weather_code, day)
+    val (topColor, bottomColor) = skyColors(kind, day)
+    val sky by animateColorAsState(topColor, animationSpec = tween(700), label = "sky")
+    val ground by animateColorAsState(bottomColor, animationSpec = tween(700), label = "ground")
     Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(32.dp))
-        .background(Brush.verticalGradient(listOf(sky, if (day) Color(0xFF104461) else Color(0xFF101831))))) {
+        .background(Brush.verticalGradient(listOf(sky, ground)))) {
+        WeatherParticles(kind, Modifier.matchParentSize())
         Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(if (day) tr("ΗΡΑΚΛΕΙΟ ΤΩΡΑ · ΗΜΕΡΑ", "HERAKLION NOW · DAY") else tr("ΗΡΑΚΛΕΙΟ ΤΩΡΑ · ΝΥΧΤΑ", "HERAKLION NOW · NIGHT"), color = Color(0xFFC2E8F7),
@@ -339,7 +301,8 @@ private fun CurrentWeather(current: Current, fahrenheit: Boolean) {
                 Text(value, color = Color.White, fontSize = 64.sp, fontWeight = FontWeight.Light)
             }
             Text(localWeatherDescription(current.weather_code), color = Color.White, style = MaterialTheme.typography.titleMedium)
-            Text("${tr("Αίσθηση", "Feels like")} ${temperature(current.apparent_temperature, fahrenheit)}", color = Color(0xFFC2E8F7))
+            Text("${tr("Αίσθηση", "Feels like")} ${temperature(current.apparent_temperature, fahrenheit)} · 💨 ${current.wind_speed_10m.roundToInt()} km/h",
+                color = Color(0xFFC2E8F7))
         }
     }
 }

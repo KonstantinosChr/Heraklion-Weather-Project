@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">Heraklion Weather Project</string>
+    <string name="widget_description">Ο καιρός στο Ηράκλειο τώρα</string>
 </resources>

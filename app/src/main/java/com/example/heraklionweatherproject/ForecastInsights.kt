@@ -5,7 +5,7 @@ import java.util.Locale
 import java.util.TimeZone
 
 /** All temperatures remain Celsius until formatted for display. */
-data class TemperatureSample(val time: String, val timestamp: Long, val celsius: Double)
+data class TemperatureSample(val time: String, val timestamp: Long, val celsius: Double, val rain: Int? = null)
 
 fun forecastTimestamp(value: String): Long? = runCatching {
     require(Regex("\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}").matches(value))
@@ -22,7 +22,7 @@ fun temperatureSamples(hourly: Hourly, start: String): List<TemperatureSample> {
         val millis = forecastTimestamp(time) ?: return@mapIndexedNotNull null
         val value = hourly.temperature_2m.getOrNull(index) ?: return@mapIndexedNotNull null
         if (millis < startMillis || millis >= endMillis || !value.isFinite()) null
-        else TemperatureSample(time, millis, value)
+        else TemperatureSample(time, millis, value, hourly.precipitation_probability.getOrNull(index)?.takeIf { it in 0..100 })
     }.distinctBy { it.timestamp }.sortedBy { it.timestamp }
 }
 

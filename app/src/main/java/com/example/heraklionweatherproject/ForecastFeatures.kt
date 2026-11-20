@@ -11,6 +11,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.platform.LocalContext
@@ -44,9 +45,10 @@ fun TemperatureChart(hourly: Hourly, start: String, fahrenheit: Boolean) {
         animationSpec = tween(800, easing = FastOutSlowInEasing), label = "chartReveal")
     val lineColor = MaterialTheme.colorScheme.primary
     val gridColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+    val rainColor = Color(0xFF3A8EDB)
     Surface(shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface) {
         Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(tr("Θερμοκρασία · επόμενο 24ωρο", "Temperature · next 24 hours"),
+            Text(tr("Θερμοκρασία & βροχή · επόμενο 24ωρο", "Temperature & rain · next 24 hours"),
                 style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             if (samples.isEmpty()) {
                 Text(tr("Δεν υπάρχουν διαθέσιμα δεδομένα. Δοκίμασε ανανέωση.",
@@ -58,7 +60,8 @@ fun TemperatureChart(hourly: Hourly, start: String, fahrenheit: Boolean) {
                 val top = if (min == max) max + 1.0 else max
                 val index = selected.roundToInt().coerceIn(0, samples.lastIndex)
                 val sample = samples[index]
-                val selectedText = "${sample.time.substring(5, 10).replace('-', '/')} · ${sample.time.substringAfter('T')} · ${temperature(sample.celsius, fahrenheit)}"
+                val selectedText = "${sample.time.substring(5, 10).replace('-', '/')} · ${sample.time.substringAfter('T')} · ${temperature(sample.celsius, fahrenheit)}" +
+                        (sample.rain?.let { " · 💧 $it%" } ?: "")
                 val chartDescription = tr("Γράφημα θερμοκρασίας. Ελάχιστη", "Temperature chart. Minimum") +
                         " ${temperature(min, fahrenheit)}, " + tr("μέγιστη", "maximum") + " ${temperature(max, fahrenheit)}."
                 Text(selectedText, color = lineColor, fontWeight = FontWeight.Bold)
@@ -85,6 +88,16 @@ fun TemperatureChart(hourly: Hourly, start: String, fahrenheit: Boolean) {
                             drawLine(gridColor, Offset(inset, y), Offset(inset + width, y), strokeWidth = 1.dp.toPx())
                         }
                         clipRect(right = inset + width * reveal + inset) {
+                            // Chance of rain as translucent bars behind the temperature line.
+                            val barWidth = (width / samples.size.coerceAtLeast(1) * 0.6f).coerceAtLeast(2f)
+                            samples.forEachIndexed { i, s ->
+                                val rain = s.rain ?: return@forEachIndexed
+                                if (rain <= 0) return@forEachIndexed
+                                val x = point(i).x
+                                val barHeight = height * rain / 100f
+                                drawRect(rainColor.copy(alpha = 0.28f), Offset(x - barWidth / 2, inset + height - barHeight),
+                                    androidx.compose.ui.geometry.Size(barWidth, barHeight))
+                            }
                             for (i in 0 until samples.lastIndex) {
                                 drawLine(lineColor, point(i), point(i + 1), strokeWidth = 3.dp.toPx(), cap = StrokeCap.Round)
                             }
@@ -105,8 +118,8 @@ fun TemperatureChart(hourly: Hourly, start: String, fahrenheit: Boolean) {
                         valueRange = 0f..samples.lastIndex.toFloat(), steps = (samples.size - 2).coerceAtLeast(0),
                         modifier = Modifier.semantics { contentDescription = sliderLabel })
                 }
-                Text(tr("Ώρες Ελλάδας · Μετακίνησε τον δείκτη για λεπτομέρειες.",
-                    "Greek local time · Move the slider for details."), style = MaterialTheme.typography.bodySmall)
+                Text(tr("Ώρες Ελλάδας · Μπλε στήλες: πιθανότητα βροχής · Μετακίνησε τον δείκτη για λεπτομέρειες.",
+                    "Greek local time · Blue bars: chance of rain · Move the slider for details."), style = MaterialTheme.typography.bodySmall)
             }
         }
     }
